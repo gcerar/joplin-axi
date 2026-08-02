@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -689,6 +691,274 @@ func TestNotesListCombinedFiltersIntersectByID(t *testing.T) {
 		}
 		if newIdx > midIdx {
 			t.Errorf("expected note-new before note-mid (sorted by recency):\n%s", result.Output)
+		}
+	})
+}
+
+// ── notes get — field-efficient fetching ────────────────────────────────────
+
+func TestNotesGetFieldEfficiency(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("requests only the API fields needed for the default display fields", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "title": "Note", "body": "hi", "parent_id": "nb1", "is_todo": float64(0)}, nil
+		}
+		stub.ListNotebooksFunc = func([]string) ([]map[string]any, error) {
+			return []map[string]any{{"id": "nb1", "title": "Inbox", "parent_id": ""}}, nil
+		}
+
+		if _, err := NotesCommands["get"].Run(ctx, args.ParsedArgs{Positionals: []string{"n1"}}, stub); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(stub.GetNoteCalls) != 1 {
+			t.Fatalf("got %d GetNote calls, want 1", len(stub.GetNoteCalls))
+		}
+
+		requested := stub.GetNoteCalls[0][1].([]string)
+		sort.Strings(requested)
+		want := []string{"body", "created_time", "id", "is_todo", "parent_id", "title", "updated_time"}
+		if !slices.Equal(requested, want) {
+			t.Errorf("requested fields = %v, want %v", requested, want)
+		}
+	})
+
+	t.Run("requests only id/title when --fields id,title is given (not body)", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "title": "Note"}, nil
+		}
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1"}, Flags: map[string]any{"fields": "id,title"}}
+		if _, err := NotesCommands["get"].Run(ctx, parsed, stub); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		requested := stub.GetNoteCalls[0][1].([]string)
+		sort.Strings(requested)
+		if !slices.Equal(requested, []string{"id", "title"}) {
+			t.Errorf("requested fields = %v, want [id title]", requested)
+		}
+		if contains(requested, "body") {
+			t.Errorf("requested fields should not contain body: %v", requested)
+		}
+	})
+}
+
+// ── notes find-in ────────────────────────────────────────────────────────────
+
+func TestNotesFindIn(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("rejects a non-positive --limit", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "body": "x"}, nil
+		}
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1", "x"}, Flags: map[string]any{"limit": float64(0)}}
+		_, err := NotesCommands["find-in"].Run(ctx, parsed, stub)
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		mustUsageError(t, err)
+	})
+
+	t.Run("suggests --full for full context when matches are found", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "body": "line one\nTODO here\nline three"}, nil
+		}
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1", "TODO"}, Flags: map[string]any{"limit": float64(20)}}
+		result, err := NotesCommands["find-in"].Run(ctx, parsed, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, "TODO here") {
+			t.Errorf("output does not contain 'TODO here':\n%s", result.Output)
+		}
+		if !strings.Contains(result.Output, "notes get n1 --full` to see these matches in full context") {
+			t.Errorf("output does not contain the full-context hint:\n%s", result.Output)
+		}
+	})
+
+	t.Run("omits the hint when there are no matches", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "body": "nothing relevant"}, nil
+		}
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1", "TODO"}, Flags: map[string]any{"limit": float64(20)}}
+		result, err := NotesCommands["find-in"].Run(ctx, parsed, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, "0 matches") {
+			t.Errorf("output does not contain '0 matches':\n%s", result.Output)
+		}
+		if strings.Contains(result.Output, "help[") {
+			t.Errorf("output should not contain a help block:\n%s", result.Output)
+		}
+	})
+
+	t.Run("flags truncated context lines instead of silently cutting them with no indication", func(t *testing.T) {
+		stub := fakeNotesClient()
+		longLine := "TODO " + strings.Repeat("x", 200)
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "body": longLine}, nil
+		}
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1", "TODO"}, Flags: map[string]any{"limit": float64(20)}}
+		result, err := NotesCommands["find-in"].Run(ctx, parsed, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, strings.Repeat("x", 115)) {
+			t.Errorf("output does not contain 115 x's:\n%s", result.Output)
+		}
+		if strings.Contains(result.Output, strings.Repeat("x", 116)) {
+			t.Errorf("output should not contain 116 x's:\n%s", result.Output)
+		}
+		if !strings.Contains(result.Output, "Some context lines were truncated") {
+			t.Errorf("output does not contain the truncation notice:\n%s", result.Output)
+		}
+	})
+}
+
+// ── notes links ──────────────────────────────────────────────────────────────
+
+func TestNotesLinks(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("suggests viewing a linked note only when an internal link is present", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "body": "[Internal](:/1234567890abcdef1234567890abcdef)"}, nil
+		}
+
+		result, err := NotesCommands["links"].Run(ctx, args.ParsedArgs{Positionals: []string{"n1"}}, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, "note") {
+			t.Errorf("output does not contain 'note':\n%s", result.Output)
+		}
+		if !strings.Contains(result.Output, "view a linked note") {
+			t.Errorf("output does not contain the linked-note hint:\n%s", result.Output)
+		}
+	})
+
+	t.Run("omits the hint when all links are external", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "body": "[External](https://example.com)"}, nil
+		}
+
+		result, err := NotesCommands["links"].Run(ctx, args.ParsedArgs{Positionals: []string{"n1"}}, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, "external") {
+			t.Errorf("output does not contain 'external':\n%s", result.Output)
+		}
+		if strings.Contains(result.Output, "help[") {
+			t.Errorf("output should not contain a help block:\n%s", result.Output)
+		}
+	})
+
+	t.Run("omits the hint when there are no links at all", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteFunc = func(string, []string) (map[string]any, error) {
+			return map[string]any{"id": "n1", "body": "no links here"}, nil
+		}
+
+		result, err := NotesCommands["links"].Run(ctx, args.ParsedArgs{Positionals: []string{"n1"}}, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, "0 links found") {
+			t.Errorf("output does not contain '0 links found':\n%s", result.Output)
+		}
+		if strings.Contains(result.Output, "help[") {
+			t.Errorf("output should not contain a help block:\n%s", result.Output)
+		}
+	})
+}
+
+// ── notes resources ──────────────────────────────────────────────────────────
+
+func TestNotesResources(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("does not request ocr_text unless --fields asks for it", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteResourcesFunc = func(string, []string) ([]map[string]any, error) { return nil, nil }
+
+		if _, err := NotesCommands["resources"].Run(ctx, args.ParsedArgs{Positionals: []string{"n1"}}, stub); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		requested := stub.GetNoteResourcesCalls[0][1].([]string)
+		if contains(requested, "ocr_text") {
+			t.Errorf("requested fields should not contain ocr_text: %v", requested)
+		}
+	})
+
+	t.Run("requests ocr_text when --fields includes it", func(t *testing.T) {
+		stub := fakeNotesClient()
+		stub.GetNoteResourcesFunc = func(string, []string) ([]map[string]any, error) { return nil, nil }
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1"}, Flags: map[string]any{"fields": "id,title,ocr_text"}}
+		if _, err := NotesCommands["resources"].Run(ctx, parsed, stub); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		requested := stub.GetNoteResourcesCalls[0][1].([]string)
+		if !contains(requested, "ocr_text") {
+			t.Errorf("requested fields should contain ocr_text: %v", requested)
+		}
+	})
+
+	t.Run("truncates long OCR text by default and shows a --full hint", func(t *testing.T) {
+		stub := fakeNotesClient()
+		longText := strings.Repeat("x", 600)
+		stub.GetNoteResourcesFunc = func(string, []string) ([]map[string]any, error) {
+			return []map[string]any{{"id": "r1", "title": "scan.png", "mime": "image/png", "size": float64(100), "ocr_text": longText}}, nil
+		}
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1"}, Flags: map[string]any{"fields": "id,title,ocr_text"}}
+		result, err := NotesCommands["resources"].Run(ctx, parsed, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, strings.Repeat("x", 500)) {
+			t.Errorf("output does not contain 500 x's:\n%s", result.Output)
+		}
+		if strings.Contains(result.Output, strings.Repeat("x", 501)) {
+			t.Errorf("output should not contain 501 x's:\n%s", result.Output)
+		}
+		if !strings.Contains(result.Output, "notes resources n1 --full") {
+			t.Errorf("output does not contain the --full hint:\n%s", result.Output)
+		}
+	})
+
+	t.Run("shows complete OCR text with --full and no truncation hint", func(t *testing.T) {
+		stub := fakeNotesClient()
+		longText := strings.Repeat("x", 600)
+		stub.GetNoteResourcesFunc = func(string, []string) ([]map[string]any, error) {
+			return []map[string]any{{"id": "r1", "title": "scan.png", "mime": "image/png", "size": float64(100), "ocr_text": longText}}, nil
+		}
+
+		parsed := args.ParsedArgs{Positionals: []string{"n1"}, Flags: map[string]any{"fields": "id,title,ocr_text", "full": true}}
+		result, err := NotesCommands["resources"].Run(ctx, parsed, stub)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result.Output, longText) {
+			t.Errorf("output does not contain the full OCR text:\n%s", result.Output)
+		}
+		if strings.Contains(result.Output, "--full` to see complete OCR text") {
+			t.Errorf("output should not contain the truncation hint:\n%s", result.Output)
 		}
 	})
 }

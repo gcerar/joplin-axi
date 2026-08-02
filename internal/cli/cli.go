@@ -40,7 +40,7 @@ usage: joplin-axi <group> <command> [flags]
 groups:
   notebooks   list, create, update, delete, restore
   tags        list, of, create, update, delete, add, remove
-  notes       list, get, create, update, edit, delete, restore
+  notes       list, get, find-in, links, resources, create, update, edit, delete, restore
 
 Run ` + "`joplin-axi <group> <command> --help`" + ` for details on a specific command.`
 

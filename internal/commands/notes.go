@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gcerar/joplin-axi/internal/args"
@@ -375,6 +376,224 @@ func runNotesGet(ctx context.Context, parsed args.ParsedArgs, c client.Client) (
 	return Ok(toon.Sections(parts...)), nil
 }
 
+// ── notes find-in ────────────────────────────────────────────────────────────
+
+const notesFindInContextLimit = 120
+
+var notesFindInSpec = args.CommandSpec{
+	Name:    "notes find-in",
+	Summary: "Regex search within a single note's body (line-based, with context).",
+	Usage:   "joplin-axi notes find-in <id> <pattern> [--ignore-case] [--limit <n>]",
+	Flags: []args.FlagSpec{
+		{Name: "ignore-case", Type: args.FlagBoolean, Description: "Case-insensitive match", Default: false},
+		{Name: "limit", Type: args.FlagNumber, Description: "Max matches to return", Default: float64(20)},
+	},
+	Examples: []string{`joplin-axi notes find-in 3f9c2a1b "TODO:.*"`},
+}
+
+func runNotesFindIn(ctx context.Context, parsed args.ParsedArgs, c client.Client) (CommandResult, error) {
+	if len(parsed.Positionals) < 2 || parsed.Positionals[0] == "" || parsed.Positionals[1] == "" {
+		return CommandResult{}, &args.UsageError{
+			Message:   "requires <id> and <pattern>",
+			HelpLines: []string{"joplin-axi notes find-in <id> <pattern>"},
+		}
+	}
+	id, pattern := parsed.Positionals[0], parsed.Positionals[1]
+
+	limit, _ := parsed.NumberFlag("limit")
+	if limit <= 0 {
+		return CommandResult{}, &args.UsageError{Message: "--limit must be a positive number", HelpLines: []string{notesFindInSpec.Usage}}
+	}
+
+	rePattern := pattern
+	if parsed.BoolFlag("ignore-case") {
+		rePattern = "(?i)" + pattern
+	}
+	// Go's RE2 engine (no backreferences/lookaround) rather than JS's regex
+	// syntax — an accepted, documented difference; a compile error on an
+	// unsupported pattern is a clear enough failure mode for this diagnostic
+	// command, not worth a validation layer of its own.
+	re, err := regexp.Compile(rePattern)
+	if err != nil {
+		return CommandResult{}, &args.UsageError{Message: fmt.Sprintf("invalid regex: %s", err.Error())}
+	}
+
+	note, err := c.GetNote(ctx, id, []string{"id", "body"})
+	if err != nil {
+		return CommandResult{}, err
+	}
+	lines := strings.Split(mapfield.String(note, "body"), "\n")
+
+	limitInt := int(limit)
+	anyContextTruncated := false
+	var rows []map[string]any
+	for i := 0; i < len(lines) && len(rows) < limitInt; i++ {
+		loc := re.FindStringIndex(lines[i])
+		if loc == nil {
+			continue
+		}
+		r := toon.Truncate(strings.TrimSpace(lines[i]), notesFindInContextLimit)
+		if r.Truncated {
+			anyContextTruncated = true
+		}
+		rows = append(rows, map[string]any{"line": i + 1, "match": lines[i][loc[0]:loc[1]], "context": r.Text})
+	}
+
+	var body string
+	if len(rows) > 0 {
+		body = toon.Table("matches", []string{"line", "match", "context"}, rows)
+	} else {
+		body = fmt.Sprintf("matches: 0 matches for /%s/ in note %s", pattern, id)
+	}
+
+	var hints []string
+	if len(rows) > 0 {
+		if anyContextTruncated {
+			hints = append(hints, fmt.Sprintf("Some context lines were truncated; run `joplin-axi notes get %s --full` to see complete lines.", id))
+		} else {
+			hints = append(hints, fmt.Sprintf("Run `joplin-axi notes get %s --full` to see these matches in full context.", id))
+		}
+	}
+
+	return Ok(toon.Sections(body, toon.Help(hints))), nil
+}
+
+// ── notes links ──────────────────────────────────────────────────────────────
+
+var noteLinkRE = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
+var internalTargetRE = regexp.MustCompile(`(?i)^:/[0-9a-f]{32}`)
+
+var notesLinksSpec = args.CommandSpec{
+	Name:     "notes links",
+	Summary:  "Extract markdown links from a note's body.",
+	Usage:    "joplin-axi notes links <id>",
+	Examples: []string{"joplin-axi notes links 3f9c2a1b"},
+}
+
+func runNotesLinks(ctx context.Context, parsed args.ParsedArgs, c client.Client) (CommandResult, error) {
+	id, err := args.RequirePositional(parsed, 0, "id", "joplin-axi notes links <id>")
+	if err != nil {
+		return CommandResult{}, err
+	}
+
+	note, err := c.GetNote(ctx, id, []string{"id", "body"})
+	if err != nil {
+		return CommandResult{}, err
+	}
+
+	matches := noteLinkRE.FindAllStringSubmatch(mapfield.String(note, "body"), -1)
+	rows := make([]map[string]any, 0, len(matches))
+	hasInternalLink := false
+	for _, m := range matches {
+		text, target := m[1], m[2]
+		linkType := "external"
+		if internalTargetRE.MatchString(target) {
+			linkType = "note"
+			hasInternalLink = true
+		}
+		rows = append(rows, map[string]any{"text": text, "target": target, "type": linkType})
+	}
+
+	var body string
+	if len(rows) > 0 {
+		body = toon.Table("links", []string{"text", "target", "type"}, rows)
+	} else {
+		body = fmt.Sprintf("links: 0 links found in note %s", id)
+	}
+
+	var hints []string
+	if hasInternalLink {
+		hints = append(hints, "Run `joplin-axi notes get <id>` (strip the leading `:/` from an internal link's target) to view a linked note.")
+	}
+
+	return Ok(toon.Sections(body, toon.Help(hints))), nil
+}
+
+// ── notes resources ──────────────────────────────────────────────────────────
+
+var notesDefaultResourceFields = []string{"id", "title", "mime", "size"}
+var notesAvailableResourceFields = []string{"id", "title", "mime", "size", "ocr_text"}
+
+const notesOCRPreviewLimit = 500
+
+var notesResourcesSpec = args.CommandSpec{
+	Name:    "notes resources",
+	Summary: "List a note's attached resources (images, PDFs, attachments).",
+	Usage:   "joplin-axi notes resources <id> [--fields <list>] [--full]",
+	Flags: []args.FlagSpec{
+		{Name: "fields", Type: args.FlagString, Description: fmt.Sprintf("Comma-separated output fields (%s)", strings.Join(notesAvailableResourceFields, ","))},
+		{Name: "full", Type: args.FlagBoolean, Description: "Show complete OCR text instead of a truncated preview", Default: false},
+	},
+	Examples: []string{
+		"joplin-axi notes resources 3f9c2a1b",
+		"joplin-axi notes resources 3f9c2a1b --fields id,title,ocr_text --full",
+	},
+}
+
+func runNotesResources(ctx context.Context, parsed args.ParsedArgs, c client.Client) (CommandResult, error) {
+	id, err := args.RequirePositional(parsed, 0, "id", "joplin-axi notes resources <id>")
+	if err != nil {
+		return CommandResult{}, err
+	}
+
+	fieldsRaw, hasFields := parsed.StringFlag("fields")
+	fieldList := notesDefaultResourceFields
+	if hasFields && fieldsRaw != "" {
+		fieldList = args.SplitList(fieldsRaw)
+	}
+	for _, f := range fieldList {
+		if !contains(notesAvailableResourceFields, f) {
+			return CommandResult{}, &args.UsageError{
+				Message:   fmt.Sprintf("unknown field `%s` for `notes resources`", f),
+				HelpLines: []string{fmt.Sprintf("valid fields: %s", strings.Join(notesAvailableResourceFields, ", "))},
+			}
+		}
+	}
+
+	// Only request ocr_text from the API when it's actually going to be
+	// shown — it can be large, and previously was always fetched regardless
+	// of --fields.
+	resources, err := c.GetNoteResources(ctx, id, fieldList)
+	if err != nil {
+		return CommandResult{}, err
+	}
+
+	full := parsed.BoolFlag("full")
+	anyTruncated := false
+	rows := make([]map[string]any, len(resources))
+	for i, r := range resources {
+		ocrText := ""
+		if contains(fieldList, "ocr_text") {
+			if raw := mapfield.String(r, "ocr_text"); raw != "" {
+				if full {
+					ocrText = raw
+				} else {
+					preview := toon.Truncate(raw, notesOCRPreviewLimit)
+					ocrText = preview.Text
+					if preview.Truncated {
+						anyTruncated = true
+					}
+				}
+			}
+		}
+		rows[i] = map[string]any{"id": r["id"], "title": r["title"], "mime": r["mime"], "size": r["size"], "ocr_text": ocrText}
+	}
+
+	var body string
+	if len(rows) > 0 {
+		body = toon.Table("resources", fieldList, rows)
+	} else {
+		body = fmt.Sprintf("resources: 0 resources attached to note %s", id)
+	}
+
+	var hints []string
+	if anyTruncated {
+		hints = append(hints, fmt.Sprintf("Run `joplin-axi notes resources %s --full` to see complete OCR text.", id))
+	}
+
+	return Ok(toon.Sections(body, toon.Help(hints))), nil
+}
+
 // ── notes create ─────────────────────────────────────────────────────────────
 
 var notesCreateSpec = args.CommandSpec{
@@ -633,16 +852,16 @@ func runNotesRestore(ctx context.Context, parsed args.ParsedArgs, c client.Clien
 	)), nil
 }
 
-// NotesCommands is the notes <command> group. find-in/links/resources are
-// added in a later phase (they touch different, more complex parsing logic
-// — regex line search and resource/OCR handling — and are split out to keep
-// this file's review size manageable).
+// NotesCommands is the notes <command> group.
 var NotesCommands = map[string]Command{
-	"list":    {Spec: notesListSpec, Run: runNotesList},
-	"get":     {Spec: notesGetSpec, Run: runNotesGet},
-	"create":  {Spec: notesCreateSpec, Run: runNotesCreate},
-	"update":  {Spec: notesUpdateSpec, Run: runNotesUpdate},
-	"edit":    {Spec: notesEditSpec, Run: runNotesEdit},
-	"delete":  {Spec: notesDeleteSpec, Run: runNotesDelete},
-	"restore": {Spec: notesRestoreSpec, Run: runNotesRestore},
+	"list":      {Spec: notesListSpec, Run: runNotesList},
+	"get":       {Spec: notesGetSpec, Run: runNotesGet},
+	"find-in":   {Spec: notesFindInSpec, Run: runNotesFindIn},
+	"links":     {Spec: notesLinksSpec, Run: runNotesLinks},
+	"resources": {Spec: notesResourcesSpec, Run: runNotesResources},
+	"create":    {Spec: notesCreateSpec, Run: runNotesCreate},
+	"update":    {Spec: notesUpdateSpec, Run: runNotesUpdate},
+	"edit":      {Spec: notesEditSpec, Run: runNotesEdit},
+	"delete":    {Spec: notesDeleteSpec, Run: runNotesDelete},
+	"restore":   {Spec: notesRestoreSpec, Run: runNotesRestore},
 }
