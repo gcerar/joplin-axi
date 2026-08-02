@@ -18,8 +18,10 @@ import (
 )
 
 // groups holds each <group> <command> command set. Populated incrementally
-// as later migration phases port notes/notebooks/tags — empty for now.
-var groups = map[string]map[string]commands.Command{}
+// as later migration phases port notes/tags too.
+var groups = map[string]map[string]commands.Command{
+	"notebooks": commands.NotebooksCommands,
+}
 
 // topLevelCommands holds single-verb commands that don't fit the <group>
 // <command> shape. import lands here once ported (a later phase).
@@ -32,6 +34,9 @@ const topLevelHelp = `joplin-axi — AXI-style CLI for Joplin
 usage: joplin-axi <group> <command> [flags]
        joplin-axi ping
        joplin-axi
+
+groups:
+  notebooks   list, create, update, delete, restore
 
 Run ` + "`joplin-axi <group> <command> --help`" + ` for details on a specific command.`
 

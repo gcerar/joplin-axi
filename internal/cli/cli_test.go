@@ -71,11 +71,33 @@ func TestRun(t *testing.T) {
 		if !strings.Contains(out.String(), "ping") {
 			t.Errorf("output %q does not list `ping` as a valid command", out.String())
 		}
+		if !strings.Contains(out.String(), "notebooks") {
+			t.Errorf("output %q does not list `notebooks` as a valid command", out.String())
+		}
 	})
 
-	// "known group, unknown subcommand within it" (the sub != "" branch of
-	// the unknown-command check) has no test yet — groups is empty until
-	// Phase 2 ports the first real one (notebooks). Add that case there,
-	// against the real group, rather than a fake one registered just for
-	// this test.
+	t.Run("known group with an unknown subcommand reports an error listing valid subcommands and exits 2", func(t *testing.T) {
+		var out bytes.Buffer
+		code := Run(ctx, []string{"notebooks", "bogus"}, &out, noEnv)
+		if code != 2 {
+			t.Errorf("exit code = %d, want 2", code)
+		}
+		if !strings.Contains(out.String(), "unknown command `notebooks bogus`") {
+			t.Errorf("output %q does not report the unknown subcommand", out.String())
+		}
+		if !strings.Contains(out.String(), "list") || !strings.Contains(out.String(), "restore") {
+			t.Errorf("output %q does not list valid notebooks subcommands", out.String())
+		}
+	})
+
+	t.Run("a known group/subcommand with no JOPLIN_TOKEN set fails before any network call", func(t *testing.T) {
+		var out bytes.Buffer
+		code := Run(ctx, []string{"notebooks", "list"}, &out, noEnv)
+		if code != 1 {
+			t.Errorf("exit code = %d, want 1", code)
+		}
+		if !strings.Contains(out.String(), "JOPLIN_TOKEN environment variable is required") {
+			t.Errorf("output %q does not report the missing token", out.String())
+		}
+	})
 }
