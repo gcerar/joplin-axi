@@ -72,6 +72,40 @@ describe('JoplinClient — URL construction', () => {
     expect(deleteOpts.body).toBeUndefined();
   });
 
+  it('sends resource creation as multipart FormData with no manually-set Content-Type', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({ id: 'res1', title: 'photo.png' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await client().createResource(Buffer.from([1, 2, 3]), 'photo.png', 'image/png');
+    const [url, opts] = fetchMock.mock.calls[0];
+
+    expect(url).toContain('/resources');
+    expect(opts.method).toBe('POST');
+    // No explicit Content-Type — fetch sets its own multipart boundary for a
+    // FormData body; setting one manually would break the boundary parsing.
+    expect(opts.headers).toBeUndefined();
+    expect(opts.body).toBeInstanceOf(FormData);
+    expect(opts.body.get('props')).toBe(JSON.stringify({ title: 'photo.png' }));
+  });
+
+  it('restores a note/notebook via PUT with deleted_time: 0', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await client().restoreNote('n1');
+    const [noteUrl, noteOpts] = fetchMock.mock.calls[0];
+    expect(noteUrl).toContain('/notes/n1');
+    expect(noteOpts.method).toBe('PUT');
+    expect(noteOpts.body).toBe(JSON.stringify({ deleted_time: 0 }));
+
+    fetchMock.mockClear();
+    await client().restoreNotebook('nb1');
+    const [folderUrl, folderOpts] = fetchMock.mock.calls[0];
+    expect(folderUrl).toContain('/folders/nb1');
+    expect(folderOpts.method).toBe('PUT');
+    expect(folderOpts.body).toBe(JSON.stringify({ deleted_time: 0 }));
+  });
+
   it('wraps a network failure (fetch throwing) in a JoplinApiError', async () => {
     vi.stubGlobal(
       'fetch',

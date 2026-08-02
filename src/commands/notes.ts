@@ -511,7 +511,27 @@ async function runDelete(parsed: ParsedArgs, client: JoplinClient): Promise<stri
   await client.deleteNote(id);
   return sections(
     object('note', { id, trashed: true }),
-    help(['Recoverable from Joplin\'s trash in the app itself — joplin-axi has no restore command yet (see TODO.md).'])
+    help([`Run \`joplin-axi notes restore ${id}\` to undo.`])
+  );
+}
+
+// ── notes restore ────────────────────────────────────────────────────────────
+
+const restoreSpec: CommandSpec = {
+  name: 'notes restore',
+  summary: "Restore a note from Joplin's trash.",
+  usage: 'joplin-axi notes restore <id>',
+  flags: {},
+  examples: ['joplin-axi notes restore 3f9c2a1b'],
+};
+
+async function runRestore(parsed: ParsedArgs, client: JoplinClient): Promise<string> {
+  const id = requirePositional(parsed, 0, 'id', 'joplin-axi notes restore <id>');
+
+  await client.restoreNote(id);
+  return sections(
+    object('note', { id, restored: true }),
+    help([`Run \`joplin-axi notes get ${id}\` to confirm.`])
   );
 }
 
@@ -525,4 +545,5 @@ export const notesCommands: Record<string, Command> = {
   update: { spec: updateSpec, run: runUpdate },
   edit: { spec: editSpec, run: runEdit },
   delete: { spec: deleteSpec, run: runDelete },
+  restore: { spec: restoreSpec, run: runRestore },
 };

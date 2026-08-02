@@ -8,6 +8,7 @@ const fakeClient = fakeClientFactory({
   createNote: vi.fn(),
   updateNote: vi.fn(),
   deleteNote: vi.fn(),
+  restoreNote: vi.fn(),
   listNotebooks: vi.fn().mockResolvedValue([]),
   listTags: vi.fn().mockResolvedValue([]),
   listNotes: vi.fn(),
@@ -172,5 +173,24 @@ describe('notes delete', () => {
     expect(deleteNote).toHaveBeenCalledWith('id1');
     expect(deleteNote).toHaveBeenCalledTimes(1);
     expect(out).toContain('trashed: true');
+    expect(out).toContain('notes restore id1');
+  });
+});
+
+describe('notes restore', () => {
+  it('requires an id', async () => {
+    const client = fakeClient();
+    await expect(notesCommands.restore.run(args([]), client)).rejects.toThrow(UsageError);
+  });
+
+  it('calls restoreNote and reports restored status', async () => {
+    const restoreNote = vi.fn();
+    const client = fakeClient({ restoreNote });
+
+    const out = await notesCommands.restore.run(args(['id1']), client);
+
+    expect(restoreNote).toHaveBeenCalledWith('id1');
+    expect(restoreNote).toHaveBeenCalledTimes(1);
+    expect(out).toContain('restored: true');
   });
 });

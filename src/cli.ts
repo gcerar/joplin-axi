@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { JoplinClient } from './client.js';
 import { homeView } from './commands/home.js';
+import { importCommand } from './commands/import.js';
 import { notebooksCommands } from './commands/notebooks.js';
 import { notesCommands } from './commands/notes.js';
 import { pingCommand } from './commands/ping.js';
@@ -24,18 +25,25 @@ const GROUPS: Record<string, Record<string, Command>> = {
   tags: tagsCommands,
 };
 
+// Single-verb commands that don't fit the <group> <command> shape.
+const TOP_LEVEL_COMMANDS: Record<string, Command> = {
+  ping: pingCommand,
+  import: importCommand,
+};
+
 const TOP_LEVEL_HELP = `joplin-axi — AXI-style CLI for Joplin
 
 usage: joplin-axi <group> <command> [flags]
        joplin-axi ping
+       joplin-axi import <path> [flags]
        joplin-axi
 
 groups:
-  notes       list, get, find-in, links, resources, create, update, edit, delete
-  notebooks   list, create, update, delete
+  notes       list, get, find-in, links, resources, create, update, edit, delete, restore
+  notebooks   list, create, update, delete, restore
   tags        list, of, create, update, delete, add, remove
 
-Run \`joplin-axi <group> <command> --help\` for details on a specific command.`;
+Run \`joplin-axi <group> <command> --help\` or \`joplin-axi import --help\` for details.`;
 
 function requireEnv(): { baseUrl: string; token: string } {
   const token = process.env.JOPLIN_TOKEN;
@@ -67,20 +75,23 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (first === 'ping') {
-    const parsed = parseArgs(rest, pingCommand.spec);
+  const topLevel = TOP_LEVEL_COMMANDS[first];
+  if (topLevel) {
+    const parsed = parseArgs(rest, topLevel.spec);
     if (parsed.help) {
-      console.log(helpText(pingCommand.spec));
+      console.log(helpText(topLevel.spec));
       return;
     }
     const client = new JoplinClient(requireEnv());
-    printResult(await pingCommand.run(parsed, client));
+    printResult(await topLevel.run(parsed, client));
     return;
   }
 
   const group = GROUPS[first];
   if (!group) {
-    console.log(errorOut(`unknown command \`${first}\``, [`valid commands: ${[...Object.keys(GROUPS), 'ping'].join(', ')}`]));
+    console.log(
+      errorOut(`unknown command \`${first}\``, [`valid commands: ${[...Object.keys(GROUPS), ...Object.keys(TOP_LEVEL_COMMANDS)].join(', ')}`])
+    );
     process.exit(2);
   }
 

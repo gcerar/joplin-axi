@@ -24,25 +24,26 @@ Use joplin-axi whenever a task touches this Joplin instance: searching or browsi
 1. Run `joplin-axi` with no arguments for a live snapshot: connectivity, notebook/tag counts, and the 5 most recently updated notes.
 2. Browse or search: `notes list --query <text>`, `notes list --notebook <id>`, `notes list --tag <title>`, `notes list --task` (see Tips for which of these combine).
 3. Drill into one note: `notes get <id>` (truncated body by default, `--full` for the whole thing), `notes find-in <id> <pattern>` for a regex search inside it, `notes links <id>` for outgoing links, `notes resources <id>` for attachments.
-4. Mutate notes with `notes create`, `notes update`, `notes edit` (find/replace, append, prepend), `notes delete`.
-5. Manage structure with `notebooks list/create/update/delete` and `tags list/of/create/update/delete/add/remove`.
-6. Every response ends with contextual `help:` next-step hints — follow them.
+4. Mutate notes with `notes create`, `notes update`, `notes edit` (find/replace, append, prepend), `notes delete`/`notes restore`.
+5. Manage structure with `notebooks list/create/update/delete/restore` and `tags list/of/create/update/delete/add/remove`.
+6. Bring in external notes with `import <path> --notebook <id>` (markdown file/directory or a Joplin `.jex` export) — run `--dry-run` first to preview counts before writing anything.
+7. Every response ends with contextual `help:` next-step hints — follow them.
 
 ## Commands
 
 ```
 commands[3]:
-  notes=list,get,find-in,links,resources,create,update,edit,delete
-  notebooks=list,create,update,delete
+  notes=list,get,find-in,links,resources,create,update,edit,delete,restore
+  notebooks=list,create,update,delete,restore
   tags=list,of,create,update,delete,add,remove
 ```
 
-Plus top-level `ping` (connectivity/auth check) and the no-args home view. Run `joplin-axi <group> <command> --help` for a command's flags and examples.
+Plus top-level `ping` (connectivity/auth check), `import <path>` (see Tips), and the no-args home view. Run `joplin-axi <group> <command> --help` or `joplin-axi import --help` for a command's flags and examples.
 
 ## Tips
 
 - Output is TOON-encoded and token-efficient, with structured errors (`error:`/`help:` lines) and exit codes 0/1/2 (success/runtime error/usage error) — not JSON.
-- `notes delete` and `notebooks delete` are **always soft deletes** (moved to Joplin's trash) — there is no `--permanent` flag, by design. There is currently no `restore` command; recovering a trashed item requires the Joplin app itself.
+- `notes delete` and `notebooks delete` are **always soft deletes** (moved to Joplin's trash) — there is no `--permanent` flag, by design. `notes restore <id>`/`notebooks restore <id>` undo it (clears `deleted_time` via `PUT`, undocumented in the REST API reference but confirmed working). Restoring a notebook restores only that notebook — sub-notebooks and the notes inside it stay trashed and must be restored individually (`notes list --trash` to find them).
 - `tags delete` has no trash concept at all in Joplin — it's immediate, and only removes the tag/its note associations, never the notes themselves.
 - `--query` performs Joplin's real full-text search (SQLite FTS4, word-tokenized — e.g. `cat` won't match `cataclysmic`), across note titles and bodies, including to-do notes.
 - `--query`, `--notebook`, `--tag`, and `--task` all combine freely on `notes list` — each active filter contributes a candidate set (notebook/tag: full, from their own ID-scoped endpoint; query/task: capped, from real search) and the result is their intersection by note ID. No notebook/tag title ever gets folded into a search query string.
@@ -62,3 +63,10 @@ Plus top-level `ping` (connectivity/auth check) and the no-args home view. Run `
 - `--limit` (and any numeric flag) rejects a non-numeric value with a usage error rather than silently becoming `NaN`; `notes list`/`notes find-in` also reject zero or negative `--limit` explicitly.
 - `notes list`'s zero-result message names every active scope (`--query`/`--notebook`/`--tag`), not just the query text.
 - `notes find-in` and `notes links` end with a next-step hint when there's something actionable to suggest: `find-in` points at `notes get <id> --full` (and flags if any context line was truncated); `links` suggests viewing a linked note, but only if at least one *internal* link was found — an empty or all-external link list gets no hint.
+- `import <path>` supports **markdown** (a single `.md` file or a directory — subdirectories become nested notebooks, frontmatter `title`/`tags`/`notebook`/`created`/`updated`/`is_todo` override the derived values) and **JEX** (`.jex`, Joplin's own export format — notebook/tag/note structure is reconstructed from the archive itself, including tag associations and attachments).
+- `import --notebook <id>` is **required for markdown** (no default target — always name one explicitly) but **optional for JEX**, which carries its own notebook hierarchy; give it to graft that hierarchy under an existing notebook instead of recreating it top-level.
+- `import --dry-run` parses the source and reports counts (notebooks/tags/notes/resources) without writing anything to Joplin — no `--notebook` needed for this. Run it first on anything unfamiliar.
+- `import --on-duplicate` controls what happens when an imported note's title already exists in the target notebook: `skip` (default, nothing created) or `rename` (appends ` (1)`, ` (2)`, ... — also applied against duplicate titles within the same import batch, not just pre-existing ones).
+- `import`'s note-to-note and note-to-resource links (both JEX `:/id` tokens and markdown relative `.md` links) are rewritten to point at the newly-created IDs once the whole batch exists — a link to something outside the current import batch (e.g. a note that already existed in Joplin before) is left untouched, not treated as broken.
+- Markdown import also uploads **local file references** (`![diagram](./diagram.png)`, a relative link to a real sibling file that isn't another imported note) as Joplin resources — the same as JEX attachments get. A link to a file that doesn't actually exist on disk is left exactly as written, not flagged.
+- A failed note in `import` doesn't abort the batch — everything else still gets created; check `notes_failed`/`notes_skipped`/`unresolved_links` in the report, not just the exit code (which is `1` if anything failed).

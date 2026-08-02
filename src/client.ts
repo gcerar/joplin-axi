@@ -1,8 +1,4 @@
-// Thin wrapper around the Joplin Web Clipper (Data API). See TODO.md for the
-// write-side operations still to add (restore-from-trash has no documented
-// or discoverable implementation anywhere — REST API docs, the joppy client,
-// and joplin-mcp's own source all lack one — so it's intentionally omitted
-// rather than guessed at).
+// Thin wrapper around the Joplin Web Clipper (Data API).
 
 export interface JoplinClientOptions {
   baseUrl: string;
@@ -57,12 +53,17 @@ export class JoplinClient {
     const url = `${this.base}${path}${sep}token=${encodeURIComponent(this.token)}`;
     const method = opts.method ?? 'GET';
 
+    // A FormData body (resource upload) must be passed through as-is — fetch
+    // sets its own multipart boundary in Content-Type, and JSON.stringify-ing
+    // it would silently send `{}` instead of the file.
+    const isFormData = opts.body instanceof FormData;
+
     let res: Response;
     try {
       res = await fetch(url, {
         method,
-        headers: opts.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        headers: opts.body !== undefined && !isFormData ? { 'Content-Type': 'application/json' } : undefined,
+        body: opts.body === undefined ? undefined : isFormData ? (opts.body as FormData) : JSON.stringify(opts.body),
       });
     } catch (e) {
       throw new JoplinApiError(`cannot reach Joplin at ${this.base} (${(e as Error).message})`);
@@ -128,6 +129,17 @@ export class JoplinClient {
     await this.request(`/notes/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
+  /**
+   * Restores a soft-deleted note by clearing `deleted_time`. Undocumented in
+   * the REST API reference (deleted_time isn't listed among PUT-modifiable
+   * fields), but confirmed working — this is exactly what joplin-mcp's own
+   * `restore_from_trash` tool does under the hood (`tools/trash.py`, via the
+   * joppy client's generic `modify_note(id, deleted_time=0)`).
+   */
+  async restoreNote(id: string): Promise<void> {
+    await this.request(`/notes/${encodeURIComponent(id)}`, { method: 'PUT', body: { deleted_time: 0 } });
+  }
+
   async createNotebook(fields: Record<string, unknown>): Promise<Record<string, any>> {
     return this.request('/folders', { method: 'POST', body: fields });
   }
@@ -139,6 +151,16 @@ export class JoplinClient {
   /** Always a soft delete (moves the notebook to Joplin's trash) — same policy as deleteNote. */
   async deleteNotebook(id: string): Promise<void> {
     await this.request(`/folders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Restores a soft-deleted notebook, same mechanism as restoreNote. Only
+   * clears deleted_time on this one notebook — per joplin-mcp's own docs,
+   * Joplin sets deleted_time on every descendant when a notebook is trashed,
+   * and restoring the parent does not clear it on sub-notebooks/notes.
+   */
+  async restoreNotebook(id: string): Promise<void> {
+    await this.request(`/folders/${encodeURIComponent(id)}`, { method: 'PUT', body: { deleted_time: 0 } });
   }
 
   async createTag(title: string): Promise<Record<string, any>> {
@@ -160,6 +182,21 @@ export class JoplinClient {
 
   async removeTagFromNote(tagId: string, noteId: string): Promise<void> {
     await this.request(`/tags/${encodeURIComponent(tagId)}/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Uploads a file as a new Joplin resource. Per the REST API reference this is
+   * the one endpoint that requires `multipart/form-data`: the file goes in a
+   * `data` field, metadata in a `props` field. Joplin always assigns its own
+   * resource ID — there's no way to request a specific one — so callers that
+   * need to rewrite `:/oldId` references in note bodies must track the
+   * returned ID themselves (see src/lib/import/importer.ts).
+   */
+  async createResource(data: Buffer, filename: string, mime?: string): Promise<Record<string, any>> {
+    const form = new FormData();
+    form.append('data', new Blob([data], mime ? { type: mime } : undefined), filename);
+    form.append('props', JSON.stringify({ title: filename }));
+    return this.request('/resources', { method: 'POST', body: form });
   }
 
   async listNotes(opts: ListNotesOptions): Promise<{ items: Record<string, any>[] }> {

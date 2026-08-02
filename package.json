@@ -1,6 +1,6 @@
 {
   "name": "joplin-axi",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AXI-style CLI for Joplin — token-efficient, agent-ergonomic note access via the Joplin Web Clipper API.",
   "license": "MIT",
   "type": "module",
@@ -23,5 +23,8 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "tar": "^7.5.22"
   }
 }

@@ -8,6 +8,7 @@ const fakeClient = fakeClientFactory({
   createNotebook: vi.fn(),
   updateNotebook: vi.fn(),
   deleteNotebook: vi.fn(),
+  restoreNotebook: vi.fn(),
 });
 
 describe('notebooks list', () => {
@@ -123,5 +124,24 @@ describe('notebooks delete', () => {
 
     expect(deleteNotebook).toHaveBeenCalledWith('nb1');
     expect(out).toContain('trashed: true');
+    expect(out).toContain('notebooks restore nb1');
+  });
+});
+
+describe('notebooks restore', () => {
+  it('requires an id', async () => {
+    const client = fakeClient();
+    await expect(notebooksCommands.restore.run(args([]), client)).rejects.toThrow(UsageError);
+  });
+
+  it('calls restoreNotebook and reports restored status, with a descendants caveat', async () => {
+    const restoreNotebook = vi.fn();
+    const client = fakeClient({ restoreNotebook });
+
+    const out = await notebooksCommands.restore.run(args(['nb1']), client);
+
+    expect(restoreNotebook).toHaveBeenCalledWith('nb1');
+    expect(out).toContain('restored: true');
+    expect(out).toContain('stay trashed');
   });
 });

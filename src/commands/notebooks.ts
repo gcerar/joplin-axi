@@ -114,7 +114,31 @@ async function runDelete(parsed: ParsedArgs, client: JoplinClient): Promise<stri
   const id = requirePositional(parsed, 0, 'id', 'joplin-axi notebooks delete <id>');
 
   await client.deleteNotebook(id);
-  return sections(object('notebook', { id, trashed: true }), help(["Recoverable from Joplin's trash in the app itself."]));
+  return sections(object('notebook', { id, trashed: true }), help([`Run \`joplin-axi notebooks restore ${id}\` to undo.`]));
+}
+
+// ── notebooks restore ────────────────────────────────────────────────────────
+
+const restoreSpec: CommandSpec = {
+  name: 'notebooks restore',
+  summary:
+    "Restore a notebook from Joplin's trash. Only restores this one notebook — sub-notebooks and the notes inside it stay trashed and must be restored individually.",
+  usage: 'joplin-axi notebooks restore <id>',
+  flags: {},
+  examples: ['joplin-axi notebooks restore c8a068acf54642a9b50f7f5a45195e2a'],
+};
+
+async function runRestore(parsed: ParsedArgs, client: JoplinClient): Promise<string> {
+  const id = requirePositional(parsed, 0, 'id', 'joplin-axi notebooks restore <id>');
+
+  await client.restoreNotebook(id);
+  return sections(
+    object('notebook', { id, restored: true }),
+    help([
+      'Run `joplin-axi notebooks list` to confirm.',
+      'Sub-notebooks and notes inside stay trashed — restore each individually (`notes list --trash` to find them).',
+    ])
+  );
 }
 
 export const notebooksCommands: Record<string, Command> = {
@@ -122,4 +146,5 @@ export const notebooksCommands: Record<string, Command> = {
   create: { spec: createSpec, run: runCreate },
   update: { spec: updateSpec, run: runUpdate },
   delete: { spec: deleteSpec, run: runDelete },
+  restore: { spec: restoreSpec, run: runRestore },
 };
