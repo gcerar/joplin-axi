@@ -17,8 +17,7 @@ import (
 	"github.com/gcerar/joplin-axi/internal/toon"
 )
 
-// groups holds each <group> <command> command set. Populated incrementally
-// as later migration phases port notes/tags too.
+// groups holds each <group> <command> command set.
 var groups = map[string]map[string]commands.Command{
 	"notebooks": commands.NotebooksCommands,
 	"tags":      commands.TagsCommands,
@@ -26,15 +25,17 @@ var groups = map[string]map[string]commands.Command{
 }
 
 // topLevelCommands holds single-verb commands that don't fit the <group>
-// <command> shape. import lands here once ported (a later phase).
+// <command> shape.
 var topLevelCommands = map[string]commands.Command{
-	"ping": commands.PingCommand,
+	"ping":   commands.PingCommand,
+	"import": commands.ImportCommand,
 }
 
 const topLevelHelp = `joplin-axi — AXI-style CLI for Joplin
 
 usage: joplin-axi <group> <command> [flags]
        joplin-axi ping
+       joplin-axi import <path> [flags]
        joplin-axi
 
 groups:
