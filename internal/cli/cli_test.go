@@ -67,6 +67,20 @@ func TestRun(t *testing.T) {
 		}
 	})
 
+	t.Run("skill works with no JOPLIN_TOKEN set — it's a NoClient command", func(t *testing.T) {
+		var out bytes.Buffer
+		code := Run(ctx, []string{"skill"}, &out, noEnv)
+		if code != 0 {
+			t.Errorf("exit code = %d, want 0", code)
+		}
+		if !strings.Contains(out.String(), "name: joplin-axi") {
+			t.Errorf("output %q does not contain the skill file's frontmatter name", out.String())
+		}
+		if strings.Contains(out.String(), "environment variable is required") {
+			t.Errorf("output %q reports the missing-token error, but skill should never require one", out.String())
+		}
+	})
+
 	t.Run("a known top-level command with no JOPLIN_TOKEN set fails before any network call", func(t *testing.T) {
 		var out bytes.Buffer
 		code := Run(ctx, []string{"ping"}, &out, noEnv)

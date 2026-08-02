@@ -34,6 +34,10 @@ func Failed(output string) CommandResult { return CommandResult{Output: output, 
 type Command struct {
 	Spec args.CommandSpec
 	Run  func(ctx context.Context, parsed args.ParsedArgs, c client.Client) (CommandResult, error)
+	// NoClient marks a command that never touches Joplin (e.g. skill) — cli.Run
+	// skips the JOPLIN_TOKEN/JOPLIN_BASE_URL check for it and passes a nil
+	// client, which Run must not dereference.
+	NoClient bool
 }
 
 // FailedItem records one failed element of a batch operation, for reporting

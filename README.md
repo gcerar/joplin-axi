@@ -30,6 +30,7 @@ export JOPLIN_BASE_URL=http://localhost:41184   # default; override if needed
 ```sh
 joplin-axi                              # home view: connectivity, counts, recent notes
 joplin-axi ping                         # connectivity + auth check
+joplin-axi skill [--output <path>]      # print (or write) the Agent Skill file — no JOPLIN_TOKEN needed
 
 joplin-axi notebooks list [--parent <id>]     # pass --parent "" for top-level only
 joplin-axi notebooks create <title> [--parent <id>] [--icon <emoji>]
@@ -91,6 +92,7 @@ go test ./...
 - **`--help` always wins over flag validation that comes after it** in the same command (e.g. `notes list --help --bogus` shows help, not an unknown-flag error) — but validation for anything *before* `--help` in the argv still applies, a deliberate trade-off to avoid misfiring on a flag value that happens to equal the literal string `--help`.
 - **`import` supports markdown and JEX only**, not joplin-mcp's full 5-format surface (HTML/CSV/generic-file fallback are deferred — see [TODO.md](TODO.md#phase-5--import)). JEX parsing (`internal/importer/jexsource.go`) uses stdlib `archive/tar` — a hand-rolled tar parser was considered and rejected, since tar parsing is exactly the kind of edge-case-heavy, security-sensitive code (long filenames, checksums, path traversal) where a battle-tested parser beats a bespoke one. A JEX archive is parsed **entirely in memory**, never extracted to disk — this both sidesteps tar-slip/path-traversal risk and fixes a real bug in the reference implementation, where extracted files get deleted (temp-directory cleanup) before the resource-upload pass runs, so JEX attachments there likely fail to embed in practice. JEX tag associations (Joplin stores tags as separate item types the reference never cross-references) are also fully reconstructed here, not just carried over from a literal `tags:` field that real exports don't set.
 - **`import --notebook` is required for markdown, optional for JEX**: no default "Imported" notebook like the reference — an import target should be explicit, not assumed. `--dry-run` runs the parse phase only (zero Joplin API calls) and doesn't require `--notebook`, since it's meant for deciding on a target before committing to one.
+- **`skill` needs no Joplin connectivity at all**: it embeds [`skills/joplin-axi/SKILL.md`](skills/joplin-axi/SKILL.md) into the binary via Go's stdlib `embed` package (`internal/skill`), so a downloaded release can hand out its own Agent Skill file without a repo clone — `joplin-axi skill > SKILL.md` or `--output <path>`. The canonical copy stays at the top-level `skills/` path (the AXI-ecosystem convention for `npx skills add` discovery); `internal/skill/skill.md` is a generated copy (`go generate ./...`), checked against the canonical file by a test so a forgotten refresh fails CI instead of shipping silently stale skill text.
 
 ## License
 

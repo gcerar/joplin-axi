@@ -29,6 +29,7 @@ var groups = map[string]map[string]commands.Command{
 var topLevelCommands = map[string]commands.Command{
 	"ping":   commands.PingCommand,
 	"import": commands.ImportCommand,
+	"skill":  commands.SkillCommand,
 }
 
 // Version is set via -ldflags at build time (see .goreleaser.yaml) —
@@ -40,6 +41,7 @@ const topLevelHelp = `joplin-axi — AXI-style CLI for Joplin
 usage: joplin-axi <group> <command> [flags]
        joplin-axi ping
        joplin-axi import <path> [flags]
+       joplin-axi skill [--output <path>]
        joplin-axi --version
        joplin-axi
 
@@ -98,11 +100,14 @@ func runCommand(ctx context.Context, cmd commands.Command, argv []string, getenv
 		return 0
 	}
 
-	opts, ok := requireEnv(getenv, stdout)
-	if !ok {
-		return 1
+	var c client.Client
+	if !cmd.NoClient {
+		opts, ok := requireEnv(getenv, stdout)
+		if !ok {
+			return 1
+		}
+		c = client.New(opts)
 	}
-	c := client.New(opts)
 
 	result, err := cmd.Run(ctx, parsed, c)
 	if err != nil {
