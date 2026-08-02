@@ -21,6 +21,7 @@ import (
 // as later migration phases port notes/tags too.
 var groups = map[string]map[string]commands.Command{
 	"notebooks": commands.NotebooksCommands,
+	"tags":      commands.TagsCommands,
 }
 
 // topLevelCommands holds single-verb commands that don't fit the <group>
@@ -37,6 +38,7 @@ usage: joplin-axi <group> <command> [flags]
 
 groups:
   notebooks   list, create, update, delete, restore
+  tags        list, of, create, update, delete, add, remove
 
 Run ` + "`joplin-axi <group> <command> --help`" + ` for details on a specific command.`
 

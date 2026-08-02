@@ -7,6 +7,7 @@ import (
 
 	"github.com/gcerar/joplin-axi/internal/args"
 	"github.com/gcerar/joplin-axi/internal/client"
+	"github.com/gcerar/joplin-axi/internal/mapfield"
 	"github.com/gcerar/joplin-axi/internal/toon"
 )
 
@@ -55,7 +56,7 @@ func runNotebooksList(ctx context.Context, parsed args.ParsedArgs, c client.Clie
 	if hasParent {
 		items = make([]map[string]any, 0, len(allItems))
 		for _, n := range allItems {
-			if fieldString(n, "parent_id") == parent {
+			if mapfield.String(n, "parent_id") == parent {
 				items = append(items, n)
 			}
 		}
@@ -169,7 +170,7 @@ func runNotebooksUpdate(ctx context.Context, parsed args.ParsedArgs, c client.Cl
 
 	return Ok(toon.Sections(
 		toon.Object("notebook", []toon.Field{
-			{Key: "id", Value: fieldStringOr(notebook, "id", id)},
+			{Key: "id", Value: mapfield.StringOr(notebook, "id", id)},
 			{Key: "title", Value: notebook["title"]},
 			{Key: "updated", Value: "ok"},
 		}),

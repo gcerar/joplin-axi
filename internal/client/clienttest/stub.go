@@ -6,6 +6,7 @@ package clienttest
 
 import (
 	"context"
+	"sync"
 
 	"github.com/gcerar/joplin-axi/internal/client"
 )
@@ -18,9 +19,15 @@ import (
 // at the exact call site instead, which is easier to debug, not harder.
 //
 // Every call is also recorded as a raw argument slice in the matching
-// *Calls field, replacing vi.fn() call-argument assertions.
+// *Calls field, replacing vi.fn() call-argument assertions. Recording is
+// mutex-protected: production code (e.g. scope.ResolveNoteScope, HomeView)
+// legitimately calls the same Client method concurrently from multiple
+// goroutines, and appending to a plain slice from more than one goroutine
+// at once is a real data race, not just a theoretical one — go test -race
+// catches it immediately without this.
 type StubClient struct {
 	client.Client
+	mu sync.Mutex
 
 	PingCalls [][]any
 	PingFunc  func() bool
@@ -86,8 +93,14 @@ type StubClient struct {
 	ListNotesFunc  func(opts client.ListNotesOptions) ([]map[string]any, error)
 }
 
+func (s *StubClient) recordCall(calls *[][]any, callArgs []any) {
+	s.mu.Lock()
+	*calls = append(*calls, callArgs)
+	s.mu.Unlock()
+}
+
 func (s *StubClient) Ping(ctx context.Context) bool {
-	s.PingCalls = append(s.PingCalls, nil)
+	s.recordCall(&s.PingCalls, nil)
 	if s.PingFunc != nil {
 		return s.PingFunc()
 	}
@@ -95,7 +108,7 @@ func (s *StubClient) Ping(ctx context.Context) bool {
 }
 
 func (s *StubClient) ListNotebooks(ctx context.Context, fields []string) ([]map[string]any, error) {
-	s.ListNotebooksCalls = append(s.ListNotebooksCalls, []any{fields})
+	s.recordCall(&s.ListNotebooksCalls, []any{fields})
 	if s.ListNotebooksFunc != nil {
 		return s.ListNotebooksFunc(fields)
 	}
@@ -103,7 +116,7 @@ func (s *StubClient) ListNotebooks(ctx context.Context, fields []string) ([]map[
 }
 
 func (s *StubClient) ListTags(ctx context.Context, fields []string) ([]map[string]any, error) {
-	s.ListTagsCalls = append(s.ListTagsCalls, []any{fields})
+	s.recordCall(&s.ListTagsCalls, []any{fields})
 	if s.ListTagsFunc != nil {
 		return s.ListTagsFunc(fields)
 	}
@@ -111,7 +124,7 @@ func (s *StubClient) ListTags(ctx context.Context, fields []string) ([]map[strin
 }
 
 func (s *StubClient) GetTagsByNote(ctx context.Context, noteID string, fields []string) ([]map[string]any, error) {
-	s.GetTagsByNoteCalls = append(s.GetTagsByNoteCalls, []any{noteID, fields})
+	s.recordCall(&s.GetTagsByNoteCalls, []any{noteID, fields})
 	if s.GetTagsByNoteFunc != nil {
 		return s.GetTagsByNoteFunc(noteID, fields)
 	}
@@ -119,7 +132,7 @@ func (s *StubClient) GetTagsByNote(ctx context.Context, noteID string, fields []
 }
 
 func (s *StubClient) GetNote(ctx context.Context, id string, fields []string) (map[string]any, error) {
-	s.GetNoteCalls = append(s.GetNoteCalls, []any{id, fields})
+	s.recordCall(&s.GetNoteCalls, []any{id, fields})
 	if s.GetNoteFunc != nil {
 		return s.GetNoteFunc(id, fields)
 	}
@@ -127,7 +140,7 @@ func (s *StubClient) GetNote(ctx context.Context, id string, fields []string) (m
 }
 
 func (s *StubClient) GetNoteResources(ctx context.Context, noteID string, fields []string) ([]map[string]any, error) {
-	s.GetNoteResourcesCalls = append(s.GetNoteResourcesCalls, []any{noteID, fields})
+	s.recordCall(&s.GetNoteResourcesCalls, []any{noteID, fields})
 	if s.GetNoteResourcesFunc != nil {
 		return s.GetNoteResourcesFunc(noteID, fields)
 	}
@@ -135,7 +148,7 @@ func (s *StubClient) GetNoteResources(ctx context.Context, noteID string, fields
 }
 
 func (s *StubClient) CreateNote(ctx context.Context, fields map[string]any) (map[string]any, error) {
-	s.CreateNoteCalls = append(s.CreateNoteCalls, []any{fields})
+	s.recordCall(&s.CreateNoteCalls, []any{fields})
 	if s.CreateNoteFunc != nil {
 		return s.CreateNoteFunc(fields)
 	}
@@ -143,7 +156,7 @@ func (s *StubClient) CreateNote(ctx context.Context, fields map[string]any) (map
 }
 
 func (s *StubClient) UpdateNote(ctx context.Context, id string, fields map[string]any) (map[string]any, error) {
-	s.UpdateNoteCalls = append(s.UpdateNoteCalls, []any{id, fields})
+	s.recordCall(&s.UpdateNoteCalls, []any{id, fields})
 	if s.UpdateNoteFunc != nil {
 		return s.UpdateNoteFunc(id, fields)
 	}
@@ -151,7 +164,7 @@ func (s *StubClient) UpdateNote(ctx context.Context, id string, fields map[strin
 }
 
 func (s *StubClient) DeleteNote(ctx context.Context, id string) error {
-	s.DeleteNoteCalls = append(s.DeleteNoteCalls, []any{id})
+	s.recordCall(&s.DeleteNoteCalls, []any{id})
 	if s.DeleteNoteFunc != nil {
 		return s.DeleteNoteFunc(id)
 	}
@@ -159,7 +172,7 @@ func (s *StubClient) DeleteNote(ctx context.Context, id string) error {
 }
 
 func (s *StubClient) RestoreNote(ctx context.Context, id string) error {
-	s.RestoreNoteCalls = append(s.RestoreNoteCalls, []any{id})
+	s.recordCall(&s.RestoreNoteCalls, []any{id})
 	if s.RestoreNoteFunc != nil {
 		return s.RestoreNoteFunc(id)
 	}
@@ -167,7 +180,7 @@ func (s *StubClient) RestoreNote(ctx context.Context, id string) error {
 }
 
 func (s *StubClient) CreateNotebook(ctx context.Context, fields map[string]any) (map[string]any, error) {
-	s.CreateNotebookCalls = append(s.CreateNotebookCalls, []any{fields})
+	s.recordCall(&s.CreateNotebookCalls, []any{fields})
 	if s.CreateNotebookFunc != nil {
 		return s.CreateNotebookFunc(fields)
 	}
@@ -175,7 +188,7 @@ func (s *StubClient) CreateNotebook(ctx context.Context, fields map[string]any) 
 }
 
 func (s *StubClient) UpdateNotebook(ctx context.Context, id string, fields map[string]any) (map[string]any, error) {
-	s.UpdateNotebookCalls = append(s.UpdateNotebookCalls, []any{id, fields})
+	s.recordCall(&s.UpdateNotebookCalls, []any{id, fields})
 	if s.UpdateNotebookFunc != nil {
 		return s.UpdateNotebookFunc(id, fields)
 	}
@@ -183,7 +196,7 @@ func (s *StubClient) UpdateNotebook(ctx context.Context, id string, fields map[s
 }
 
 func (s *StubClient) DeleteNotebook(ctx context.Context, id string) error {
-	s.DeleteNotebookCalls = append(s.DeleteNotebookCalls, []any{id})
+	s.recordCall(&s.DeleteNotebookCalls, []any{id})
 	if s.DeleteNotebookFunc != nil {
 		return s.DeleteNotebookFunc(id)
 	}
@@ -191,7 +204,7 @@ func (s *StubClient) DeleteNotebook(ctx context.Context, id string) error {
 }
 
 func (s *StubClient) RestoreNotebook(ctx context.Context, id string) error {
-	s.RestoreNotebookCalls = append(s.RestoreNotebookCalls, []any{id})
+	s.recordCall(&s.RestoreNotebookCalls, []any{id})
 	if s.RestoreNotebookFunc != nil {
 		return s.RestoreNotebookFunc(id)
 	}
@@ -199,7 +212,7 @@ func (s *StubClient) RestoreNotebook(ctx context.Context, id string) error {
 }
 
 func (s *StubClient) CreateTag(ctx context.Context, title string) (map[string]any, error) {
-	s.CreateTagCalls = append(s.CreateTagCalls, []any{title})
+	s.recordCall(&s.CreateTagCalls, []any{title})
 	if s.CreateTagFunc != nil {
 		return s.CreateTagFunc(title)
 	}
@@ -207,7 +220,7 @@ func (s *StubClient) CreateTag(ctx context.Context, title string) (map[string]an
 }
 
 func (s *StubClient) UpdateTag(ctx context.Context, id, title string) (map[string]any, error) {
-	s.UpdateTagCalls = append(s.UpdateTagCalls, []any{id, title})
+	s.recordCall(&s.UpdateTagCalls, []any{id, title})
 	if s.UpdateTagFunc != nil {
 		return s.UpdateTagFunc(id, title)
 	}
@@ -215,7 +228,7 @@ func (s *StubClient) UpdateTag(ctx context.Context, id, title string) (map[strin
 }
 
 func (s *StubClient) DeleteTag(ctx context.Context, id string) error {
-	s.DeleteTagCalls = append(s.DeleteTagCalls, []any{id})
+	s.recordCall(&s.DeleteTagCalls, []any{id})
 	if s.DeleteTagFunc != nil {
 		return s.DeleteTagFunc(id)
 	}
@@ -223,7 +236,7 @@ func (s *StubClient) DeleteTag(ctx context.Context, id string) error {
 }
 
 func (s *StubClient) AddTagToNote(ctx context.Context, tagID, noteID string) error {
-	s.AddTagToNoteCalls = append(s.AddTagToNoteCalls, []any{tagID, noteID})
+	s.recordCall(&s.AddTagToNoteCalls, []any{tagID, noteID})
 	if s.AddTagToNoteFunc != nil {
 		return s.AddTagToNoteFunc(tagID, noteID)
 	}
@@ -231,7 +244,7 @@ func (s *StubClient) AddTagToNote(ctx context.Context, tagID, noteID string) err
 }
 
 func (s *StubClient) RemoveTagFromNote(ctx context.Context, tagID, noteID string) error {
-	s.RemoveTagFromNoteCalls = append(s.RemoveTagFromNoteCalls, []any{tagID, noteID})
+	s.recordCall(&s.RemoveTagFromNoteCalls, []any{tagID, noteID})
 	if s.RemoveTagFromNoteFunc != nil {
 		return s.RemoveTagFromNoteFunc(tagID, noteID)
 	}
@@ -239,7 +252,7 @@ func (s *StubClient) RemoveTagFromNote(ctx context.Context, tagID, noteID string
 }
 
 func (s *StubClient) CreateResource(ctx context.Context, data []byte, filename, mimeType string) (map[string]any, error) {
-	s.CreateResourceCalls = append(s.CreateResourceCalls, []any{data, filename, mimeType})
+	s.recordCall(&s.CreateResourceCalls, []any{data, filename, mimeType})
 	if s.CreateResourceFunc != nil {
 		return s.CreateResourceFunc(data, filename, mimeType)
 	}
@@ -247,7 +260,7 @@ func (s *StubClient) CreateResource(ctx context.Context, data []byte, filename, 
 }
 
 func (s *StubClient) ListNotes(ctx context.Context, opts client.ListNotesOptions) ([]map[string]any, error) {
-	s.ListNotesCalls = append(s.ListNotesCalls, []any{opts})
+	s.recordCall(&s.ListNotesCalls, []any{opts})
 	if s.ListNotesFunc != nil {
 		return s.ListNotesFunc(opts)
 	}

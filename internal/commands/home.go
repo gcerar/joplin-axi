@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/gcerar/joplin-axi/internal/client"
+	"github.com/gcerar/joplin-axi/internal/mapfield"
 	"github.com/gcerar/joplin-axi/internal/toon"
 )
 
@@ -64,7 +65,7 @@ func HomeView(ctx context.Context, c client.Client) (string, error) {
 		rows[i] = map[string]any{
 			"id":      n["id"],
 			"title":   n["title"],
-			"updated": toon.FmtTime(fieldInt64(n, "updated_time")),
+			"updated": toon.FmtTime(mapfield.Int64(n, "updated_time")),
 		}
 	}
 
