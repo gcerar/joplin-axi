@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/gcerar/joplin-axi/internal/args"
@@ -124,6 +125,7 @@ func runNotesList(ctx context.Context, parsed args.ParsedArgs, c client.Client) 
 	for f := range apiFields {
 		apiFieldsArr = append(apiFieldsArr, f)
 	}
+	sort.Strings(apiFieldsArr)
 
 	searchCap := limitInt * 20
 	if searchCap < 500 {
@@ -314,6 +316,7 @@ func runNotesGet(ctx context.Context, parsed args.ParsedArgs, c client.Client) (
 	for f := range apiFields {
 		apiFieldsArr = append(apiFieldsArr, f)
 	}
+	sort.Strings(apiFieldsArr)
 
 	note, err := c.GetNote(ctx, id, apiFieldsArr)
 	if err != nil {

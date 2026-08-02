@@ -1,7 +1,7 @@
 package importer
 
 import (
-	"crypto/md5"
+	"crypto/md5" // #nosec G501 -- deterministic ID generation only, not a security boundary; see the usage site
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -73,18 +73,18 @@ func rewriteAssetLinks(body, fileDir string, mdFileSet map[string]bool, resource
 
 		resource, ok := resources[resolved]
 		if !ok {
-			data, err := os.ReadFile(resolved)
+			data, err := os.ReadFile(resolved) // #nosec G304 -- resolved is a link target from the note being imported, the exact file the user asked to import
 			if err != nil {
 				continue // doesn't exist / unreadable — leave the link exactly as written.
 			}
-			sum := md5.Sum([]byte(resolved))
+			sum := md5.Sum([]byte(resolved)) // #nosec G401,G501 -- deterministic ID generation, matching Joplin's own 32-hex-char ID shape; not a security boundary, nothing secret is hashed
 			resource = &ParsedResource{ID: hex.EncodeToString(sum[:]), Filename: filepath.Base(resolved), Mime: guessMime(resolved), Data: data}
 			resources[resolved] = resource
 			*resourceOrder = append(*resourceOrder, resolved)
 		}
 
 		result.WriteString(body[lastIndex:fullStart])
-		result.WriteString(fmt.Sprintf("[%s](:/%s)", text, resource.ID))
+		fmt.Fprintf(&result, "[%s](:/%s)", text, resource.ID)
 		lastIndex = fullEnd
 	}
 	result.WriteString(body[lastIndex:])
@@ -274,7 +274,7 @@ func ParseMarkdownSource(sourcePath string) (ParsedImport, error) {
 	var notes []ParsedNote
 
 	for _, filePath := range files {
-		raw, err := os.ReadFile(filePath)
+		raw, err := os.ReadFile(filePath) // #nosec G304 -- filePath comes from walking sourcePath, the exact directory/file the user asked to import
 		if err != nil {
 			return ParsedImport{}, err
 		}

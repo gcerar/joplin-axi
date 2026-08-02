@@ -403,7 +403,7 @@ func rewriteNoteLinks(
 			resolved := resolvePath(dir, target)
 			if targetNoteID, ok := noteIDByFilePath[resolved]; ok {
 				rewritten.WriteString(body[lastIndex:fullStart])
-				rewritten.WriteString(fmt.Sprintf("[%s](:/%s)", text, targetNoteID))
+				fmt.Fprintf(&rewritten, "[%s](:/%s)", text, targetNoteID)
 				lastIndex = fullEnd
 				changed = true
 			} else if noteExistsAtPath(allNotes, resolved) {

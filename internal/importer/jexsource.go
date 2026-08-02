@@ -119,7 +119,7 @@ type namedBlob struct {
 // that for JEX (only a literal inline `tags:` field, which real exports
 // never set).
 func ParseJexSource(jexPath string) (ParsedImport, error) {
-	f, err := os.Open(jexPath)
+	f, err := os.Open(jexPath) // #nosec G304 -- jexPath is the exact archive path the user asked to import
 	if err != nil {
 		return ParsedImport{}, fmt.Errorf("not a valid JEX archive (expected a tar archive): %s — %s", jexPath, err.Error())
 	}

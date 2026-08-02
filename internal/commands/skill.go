@@ -32,7 +32,7 @@ func runSkill(_ context.Context, parsed args.ParsedArgs, _ client.Client) (Comma
 		return Ok(skill.Markdown), nil
 	}
 
-	if err := os.WriteFile(outputPath, []byte(skill.Markdown), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(skill.Markdown), 0644); err != nil { // #nosec G306 -- public documentation, not secret; group/other-readable is the intended, useful default here
 		return CommandResult{}, err
 	}
 	return Ok(toon.Object("skill", []toon.Field{{Key: "written", Value: outputPath}})), nil
