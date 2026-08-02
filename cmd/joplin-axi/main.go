@@ -8,6 +8,11 @@ import (
 	"github.com/gcerar/joplin-axi/internal/cli"
 )
 
+// version is set via -ldflags "-X main.version=..." at build time (see
+// .goreleaser.yaml) and copied into cli.Version before dispatch.
+var version = "dev"
+
 func main() {
+	cli.Version = version
 	os.Exit(cli.Run(context.Background(), os.Args[1:], os.Stdout, os.Getenv))
 }

@@ -6,26 +6,24 @@ Inspired by [joplin-mcp](https://github.com/alondmnt/joplin-mcp), a Python MCP s
 
 ## Setup
 
-Not published to npm — install from GitHub.
+A single static Go binary, no runtime to install. Two ways to get it:
+
+**Download a prebuilt binary** from the [releases page](https://github.com/gcerar/joplin-axi/releases) (Linux/macOS/Windows, amd64/arm64), then put it on your `PATH`.
+
+**Or build/install with Go** (requires Go 1.23+):
 
 ```sh
-git clone https://github.com/<your-username>/joplin-axi.git
-cd joplin-axi
-npm install
-npm run build
-npm link                                # puts `joplin-axi` on your PATH from this clone
+go install github.com/gcerar/joplin-axi/cmd/joplin-axi@latest
+```
 
+Either way:
+
+```sh
 export JOPLIN_TOKEN=<token from Joplin → Tools → Options → Web Clipper>
 export JOPLIN_BASE_URL=http://localhost:41184   # default; override if needed
 ```
 
 (Or copy `.env.example` to `.env` and load it however your shell/agent harness does.)
-
-Skip the clone and `npm link` if you just want a one-off run:
-
-```sh
-npx github:<your-username>/joplin-axi ping
-```
 
 ## Usage
 
@@ -70,19 +68,20 @@ Every subcommand supports `--help` for its flags and examples.
 ## Development
 
 ```sh
-npm run dev -- notes list          # run from source via tsx, no build step
-npm run typecheck
-npm test
-npm run test:watch
+go run ./cmd/joplin-axi notes list   # run from source, no build step
+go build ./...
+go vet ./...
+go test ./...
 ```
 
 ## Design notes
 
-- **Output format**: TOON tables/objects (`src/toon.ts`) — 3–4 default fields per list, `--fields` to expand, `--full` to bypass body truncation.
-- **Errors**: usage errors exit `2` (unknown flag/command, missing argument), runtime errors exit `1`, success exits `0`. Errors print to stdout in the same structured format as normal output — see `errorOut()` in `src/toon.ts`.
+- **Zero external dependencies**: the whole CLI is Go stdlib — `net/http` for the Joplin client, `archive/tar` for JEX import, `crypto/md5` for synthetic resource IDs. One static binary, nothing to install alongside it.
+- **Output format**: TOON tables/objects (`internal/toon/toon.go`) — 3–4 default fields per list, `--fields` to expand, `--full` to bypass body truncation.
+- **Errors**: usage errors exit `2` (unknown flag/command, missing argument), runtime errors exit `1`, success exits `0`. Errors print to stdout in the same structured format as normal output — see `ErrorOut` in `internal/toon/toon.go`.
 - **No interactive prompts**: every operation is flag-driven.
 - **Combined operations over 1:1 tool mirroring**: e.g. `notes list` merges what joplin-mcp splits into `find_notes` / `find_notes_with_tag` / `find_notes_in_notebook`.
-- **`--query`/`--notebook`/`--tag`/`--task` all combine, via ID-based intersection, not query interpolation**: `--notebook`/`--tag` each fetch a *full* candidate set from their own ID-scoped endpoint, `--query`/`--task` fetch a capped candidate set from real full-text search (`--task` as a safe `type:todo` DSL suffix — safe because it's a fixed literal, not a user-controlled title), and when more than one is active, the result is their intersection by note ID. This sidesteps a real, empirically-confirmed injection risk in the alternative approach (resolving an ID to its title and interpolating that title into the search DSL as `notebook:"..."`) — see `runList` in `src/commands/notes.ts` and [TODO.md](TODO.md) for the live-reproduced silent-false-negative that ruled it out. The same set-intersection logic is shared (`src/lib/note-scope.ts`) with `tags add`/`tags remove`, which accept these filters as an alternative to explicit `--notes`.
+- **`--query`/`--notebook`/`--tag`/`--task` all combine, via ID-based intersection, not query interpolation**: `--notebook`/`--tag` each fetch a *full* candidate set from their own ID-scoped endpoint, `--query`/`--task` fetch a capped candidate set from real full-text search (`--task` as a safe `type:todo` DSL suffix — safe because it's a fixed literal, not a user-controlled title), and when more than one is active, the result is their intersection by note ID. This sidesteps a real, empirically-confirmed injection risk in the alternative approach (resolving an ID to its title and interpolating that title into the search DSL as `notebook:"..."`) — see `runNotesList` in `internal/commands/notes.go` and [TODO.md](TODO.md) for the live-reproduced silent-false-negative that ruled it out. The same set-intersection logic is shared (`internal/scope/scope.go`) with `tags add`/`tags remove`, which accept these filters as an alternative to explicit `--notes`.
 - **Bulk mutations report, they don't gate**: `tags add`/`remove` with filters mutate immediately and print every affected note (id+title), rather than requiring a preview + `--yes` confirmation step. A confirm-gate would double round-trips even in the common correct case — against AXI's anti-friction design — and since tagging mistakes are cheap to reverse (one more `tags remove`/`add` call with the same filter), visibility-after gives the same practical safety without the tax.
 - **`--trash`**: uses Joplin's `include_deleted=1`, which the [REST API docs](https://joplinapp.org/help/api/references/rest_api/) document only for the unfiltered `GET /notes` listing (not `/search`, `/folders/:id/notes`, or `/tags/:id/notes`) — so it can't combine with `--query`/`--task`/`--notebook`/`--tag`. Since Joplin mixes trashed notes into normal results rather than returning only them, `notes list --trash` over-fetches and filters client-side to approximate a trash listing.
 - **`notes delete` is always a soft delete**: it calls plain `DELETE /notes/:id` and never sends `permanent=1`. There is deliberately no `--permanent` flag — see [TODO.md](TODO.md#phase-2--mutations-notes) for why.
@@ -90,7 +89,7 @@ npm run test:watch
 - **Mutations are idempotent, checked live not assumed**: `tags add`/`remove` on a note already in the target state, and `notes`/`notebooks delete` on an already-trashed item, all exit `0` with no error — verified against real Joplin, not just inferred from the API docs (see [TODO.md](TODO.md) — "Code review pass").
 - **`--fields` actually limits what's fetched, not just what's displayed**: `notes get` and `notes resources` only request the API fields needed for the requested output — e.g. `notes get <id> --fields id,title` never pulls the note body over the wire, and `notes resources` only fetches `ocr_text` (potentially large) when explicitly requested via `--fields`.
 - **`--help` always wins over flag validation that comes after it** in the same command (e.g. `notes list --help --bogus` shows help, not an unknown-flag error) — but validation for anything *before* `--help` in the argv still applies, a deliberate trade-off to avoid misfiring on a flag value that happens to equal the literal string `--help`.
-- **`import` supports markdown and JEX only**, not joplin-mcp's full 5-format surface (HTML/CSV/generic-file fallback are deferred — see [TODO.md](TODO.md#phase-5--import)). `tar` (`src/lib/import/jex-source.ts`) is joplin-axi's first and only runtime dependency — a hand-rolled tar parser was considered and rejected, since tar parsing is exactly the kind of edge-case-heavy, security-sensitive code (long filenames, checksums, path traversal) where a battle-tested library beats a bespoke one. A JEX archive is parsed **entirely in memory**, never extracted to disk — this both sidesteps tar-slip/path-traversal risk and fixes a real bug in the reference implementation, where extracted files get deleted (temp-directory cleanup) before the resource-upload pass runs, so JEX attachments there likely fail to embed in practice. JEX tag associations (Joplin stores tags as separate item types the reference never cross-references) are also fully reconstructed here, not just carried over from a literal `tags:` field that real exports don't set.
+- **`import` supports markdown and JEX only**, not joplin-mcp's full 5-format surface (HTML/CSV/generic-file fallback are deferred — see [TODO.md](TODO.md#phase-5--import)). JEX parsing (`internal/importer/jexsource.go`) uses stdlib `archive/tar` — a hand-rolled tar parser was considered and rejected, since tar parsing is exactly the kind of edge-case-heavy, security-sensitive code (long filenames, checksums, path traversal) where a battle-tested parser beats a bespoke one. A JEX archive is parsed **entirely in memory**, never extracted to disk — this both sidesteps tar-slip/path-traversal risk and fixes a real bug in the reference implementation, where extracted files get deleted (temp-directory cleanup) before the resource-upload pass runs, so JEX attachments there likely fail to embed in practice. JEX tag associations (Joplin stores tags as separate item types the reference never cross-references) are also fully reconstructed here, not just carried over from a literal `tags:` field that real exports don't set.
 - **`import --notebook` is required for markdown, optional for JEX**: no default "Imported" notebook like the reference — an import target should be explicit, not assumed. `--dry-run` runs the parse phase only (zero Joplin API calls) and doesn't require `--notebook`, since it's meant for deciding on a target before committing to one.
 
 ## License

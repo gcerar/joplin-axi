@@ -2,9 +2,9 @@ name: go-ci
 
 on:
   push:
-    branches: [go-rewrite]
+    branches: [main]
   pull_request:
-    branches: [go-rewrite]
+    branches: [main]
 
 jobs:
   test:

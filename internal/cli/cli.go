@@ -31,11 +31,16 @@ var topLevelCommands = map[string]commands.Command{
 	"import": commands.ImportCommand,
 }
 
+// Version is set via -ldflags at build time (see .goreleaser.yaml) —
+// "dev" identifies a local/unreleased build.
+var Version = "dev"
+
 const topLevelHelp = `joplin-axi — AXI-style CLI for Joplin
 
 usage: joplin-axi <group> <command> [flags]
        joplin-axi ping
        joplin-axi import <path> [flags]
+       joplin-axi --version
        joplin-axi
 
 groups:
@@ -130,6 +135,11 @@ func Run(ctx context.Context, argv []string, stdout io.Writer, getenv func(strin
 
 	if first == "--help" || first == "-h" {
 		fmt.Fprintln(stdout, topLevelHelp)
+		return 0
+	}
+
+	if first == "--version" || first == "-v" {
+		fmt.Fprintln(stdout, "joplin-axi "+Version)
 		return 0
 	}
 

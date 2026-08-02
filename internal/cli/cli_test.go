@@ -37,6 +37,25 @@ func TestRun(t *testing.T) {
 		}
 	})
 
+	t.Run("--version prints the version and exits 0", func(t *testing.T) {
+		var out bytes.Buffer
+		code := Run(ctx, []string{"--version"}, &out, noEnv)
+		if code != 0 {
+			t.Errorf("exit code = %d, want 0", code)
+		}
+		if !strings.Contains(out.String(), "joplin-axi "+Version) {
+			t.Errorf("output %q does not contain the version banner", out.String())
+		}
+	})
+
+	t.Run("-v is equivalent to --version", func(t *testing.T) {
+		var out bytes.Buffer
+		code := Run(ctx, []string{"-v"}, &out, noEnv)
+		if code != 0 {
+			t.Errorf("exit code = %d, want 0", code)
+		}
+	})
+
 	t.Run("no args with no JOPLIN_TOKEN set reports the error and exits 1 without touching the network", func(t *testing.T) {
 		var out bytes.Buffer
 		code := Run(ctx, nil, &out, noEnv)
