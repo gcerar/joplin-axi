@@ -1,9 +1,8 @@
-node_modules/
-dist/
 .env
 *.log
 
 # Go
 /joplin-axi
 /bin/
+/dist/
 *.test
